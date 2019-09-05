@@ -103,7 +103,7 @@ input_low_resolution = Input(shape=low_resolution_shape)
 generated_high_resolution_images = generator(input_low_resolution)
 
 # print(data_dir)
-generator.compile(loss=['binary_crossentropy'], optimizer=common_optimizer)
+generator.compile(loss=['mse'], optimizer=common_optimizer, metrics=['accuracy'])
 
 
 def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_shape):
@@ -131,14 +131,23 @@ def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_sh
 high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
                                                               low_resolution_shape=low_resolution_shape,
                                                               high_resolution_shape=high_resolution_shape)
-for epoch in range(epochs):
-    print("Epoch:{}".format(epoch))
 
+# for epoch in range(epochs):
+    # print("Epoch:{}".format(epoch))
 high_resolution_images = high_resolution_images / 127.5 - 1
 low_resolution_images = low_resolution_images / 127.5 - 1
 
 low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
 high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
 
-output = generator.fit(low_resolution_images, high_resolution_images, batch_size=batch_size, epochs=epochs)
-# output = generator_model.predict(low_resolution_images)
+# for i in range(0, 5):
+#     generator.fit(low_resolution_images, high_resolution_images, batch_size=batch_size, epochs=epochs)
+#
+# generator.save_weights('model.h5')
+generator.load_weights('model.h5')
+output = generator.predict(low_resolution_images)
+print(output)
+output = output.reshape((256, 256, 3))
+out = 0.5 * output + 0.5
+plt.imshow(out)
+plt.show()
