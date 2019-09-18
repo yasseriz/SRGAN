@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 import tensorflow as tf
+from scipy.misc import imresize, imread
 
 
 def write_log(callback, name, value, batch_no):
@@ -206,9 +207,31 @@ def build_adversarial_model(generator, discriminator, vgg):
     return model
 
 
+def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_shape):
+    # Make a list of all images inside the data directory
+    all_images = data_dir
+
+    # Choose a random batch of images
+    images_batch = np.random.choice(all_images, size=batch_size)
+
+    low_resolution_images = []
+    high_resolution_images = []
+
+    for img in images_batch:
+        # Get an ndarray of the current image
+        img1 = cv2.imread(img)
+        img1 = img1.astype(np.float32)
+
+        # Resize the image
+        img1_high_resolution = cv2.resize(img1, (256, 256))
+        img1_low_resolution = cv2.resize(img1, (64, 64))
+
+    return img1_high_resolution, img1_low_resolution
+
+
 # Define hyperparameters
 data_dir = glob('./DIV2K_train_HR/*')
-epochs = 100
+epochs = 10000
 batch_size = 1
 
 # Shape of low-resolution and high-resolution images
@@ -233,6 +256,7 @@ generated_high_resolution_images = generator(input_low_resolution)
 
 features = vgg(generated_high_resolution_images)
 discriminator.trainable = False
+discriminator.compile(optimizer=common_optimizer, loss='mse', metrics=['accuracy'])
 
 probs = discriminator(generated_high_resolution_images)
 
@@ -243,29 +267,6 @@ adversarial_model.compile(optimizer=common_optimizer, loss=['binary_crossentropy
 tensorboard = TensorBoard(log_dir="logs/".format(time.time()))
 tensorboard.set_model(generator)
 tensorboard.set_model(discriminator)
-
-
-def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_shape):
-    # Make a list of all images inside the data directory
-    all_images = data_dir
-
-    # Choose a random batch of images
-    images_batch = np.random.choice(all_images, size=batch_size)
-
-    low_resolution_images = []
-    high_resolution_images = []
-
-    for img in images_batch:
-        # Get an ndarray of the current image
-        img1 = cv2.imread(img)
-        img1 = img1.astype(np.float32)
-
-        # Resize the image
-        img1_high_resolution = cv2.resize(img1, (256, 256))
-        img1_low_resolution = cv2.resize(img1, (64, 64))
-
-    return img1_high_resolution, img1_low_resolution
-
 
 # for epoch in range(epochs):
 # print("Epoch:{}".format(epoch))
@@ -280,57 +281,107 @@ def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_sh
 # print(len(low_resolution_images))
 
 # Training
-for epoch in range(epochs):
-    print("Epoch :{}".format(epoch))
-    experiment.log_parameter('epoch', epoch)
+# for epoch in range(epochs):
+#     print("Epoch :{}".format(epoch))
+#     experiment.log_parameter('epoch', epoch)
+#
+#     # Training the discriminator network
+#
+#     high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
+#                                                                   low_resolution_shape=low_resolution_shape,
+#                                                                   high_resolution_shape=high_resolution_shape)
+#
+#     high_resolution_images = high_resolution_images / 127.5 - 1
+#     low_resolution_images = low_resolution_images / 127.5 - 1
+#
+#     low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
+#     high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+#
+#     generated_high_resolution_images = generator.predict(low_resolution_images)
+#
+#     # Generating batch of real and fake labels
+#     real_labels = np.ones((batch_size, 16, 16, 1))
+#     fake_labels = np.zeros((batch_size, 16, 16, 1))
+#
+#     # d_loss_real = discriminator.train_on_batch(high_resolution_images, real_labels)
+#     # d_loss_fake = discriminator.train_on_batch(generated_high_resolution_images, fake_labels)
+#     #
+#     # # Calculating the discriminator loss
+#     # d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+#     # print("d_loss :", d_loss)
+#
+#     # Training the generator network
+#     high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
+#                                                                   low_resolution_shape=low_resolution_shape,
+#                                                                   high_resolution_shape=high_resolution_shape)
+#
+#     high_resolution_images = high_resolution_images / 127.5 - 1
+#     low_resolution_images = low_resolution_images / 127.5 - 1
+#
+#     low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
+#     high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+#
+#     image_features = vgg.predict(high_resolution_images)
+#
+#     # g_loss = adversarial_model.train_on_batch([low_resolution_images, high_resolution_images],
+#     #                                           [real_labels, image_features])
+#     # print("g_loss :", g_loss)
+#     # # Write the losses to Tensorboard
+#     # write_log(tensorboard, 'g_loss', g_loss[0], epoch)
+#     # write_log(tensorboard, 'd_loss', d_loss[0], epoch)
+#     #
+#     # generator.save_weights("generator.h5")
+#     # discriminator.save_weights("discriminator.h5")
 
-    # Training the discriminator network
 
-    high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
-                                                                  low_resolution_shape=low_resolution_shape,
-                                                                  high_resolution_shape=high_resolution_shape)
+discriminator.load_weights("discriminator.h5")
+generator.load_weights("generator.h5")
 
-    high_resolution_images = high_resolution_images / 127.5 - 1
-    low_resolution_images = low_resolution_images / 127.5 - 1
+high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
+                                                              low_resolution_shape=low_resolution_shape,
+                                                              high_resolution_shape=high_resolution_shape)
 
-    low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
-    high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+high_resolution_images = high_resolution_images / 127.5 - 1
+low_resolution_images = low_resolution_images / 127.5 - 1
 
-    generated_high_resolution_images = generator.predict(low_resolution_images)
+low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
+high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
 
-    # Generating batch of real and fake labels
-    real_labels = np.ones((batch_size, 16, 16, 1))
-    fake_labels = np.zeros((batch_size, 16, 16, 1))
+generated_images = generator.predict_on_batch(low_resolution_images)
 
-    d_loss_real = discriminator.train_on_batch(high_resolution_images, real_labels)
-    d_loss_fake = discriminator.train_on_batch(generated_high_resolution_images, fake_labels)
 
-    # Calculating the discriminator loss
-    d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-    print("d_loss :", d_loss)
+low_resolution_images = low_resolution_images.reshape(64, 64, 3)
+high_resolution_images = high_resolution_images.reshape(256, 256, 3)
+generated_images = generated_images.reshape(256, 256, 3)
 
-    # Training the generator network
-    high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
-                                                                  low_resolution_shape=low_resolution_shape,
-                                                                  high_resolution_shape=high_resolution_shape)
+fig = plt.figure()
+ax = fig.add_subplot(1, 3, 1)
+ax.imshow(low_resolution_images)
+ax.axis("off")
+ax.set_title("Low-resolution")
 
-    high_resolution_images = high_resolution_images / 127.5 - 1
-    low_resolution_images = low_resolution_images / 127.5 - 1
+ax = fig.add_subplot(1, 3, 2)
+ax.imshow(high_resolution_images)
+ax.axis("off")
+ax.set_title("Original")
 
-    low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
-    high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+ax = fig.add_subplot(1, 3, 3)
+ax.imshow(generated_images)
+ax.axis("off")
+ax.set_title("Generated")
 
-    image_features = vgg.predict(high_resolution_images)
+plt.show()
 
-    g_loss = adversarial_model.train_on_batch([low_resolution_images, high_resolution_images],
-                                              [real_labels, image_features])
-    print("g_loss :", g_loss)
-    # Write the losses to Tensorboard
-    write_log(tensorboard, 'g_loss', g_loss[0], epoch)
-    write_log(tensorboard, 'd_loss', d_loss[0], epoch)
 
-    generator.save_weights("generator.h5")
-    discriminator.save_weights("discriminator.h5")
+
+
+
+
+
+
+
+
+
 
 # generator.fit(low_resolution_images, high_resolution_images, batch_size=batch_size, epochs=epochs)
 
