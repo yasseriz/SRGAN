@@ -1,9 +1,11 @@
 from comet_ml import Experiment
-
 experiment = Experiment("1Uf990Nvlki77d4AOubsK9lKX", project_name="SRGAN_Personal", log_env_gpu=True)
+
 import time
+import keras
 from keras import Input
 from keras.layers import BatchNormalization, Activation, Add, LeakyReLU, Dense
+from keras.layers.advanced_activations import PReLU
 from keras.layers.convolutional import Conv2D, UpSampling2D
 from keras.applications import VGG19
 from keras.callbacks import TensorBoard
@@ -16,7 +18,11 @@ import numpy as np
 import cv2
 import tensorflow as tf
 from scipy.misc import imresize, imread
-
+from keras import backend as K
+import math
+import numpy
+from skimage.measure import compare_ssim, compare_psnr
+import csv
 
 def write_log(callback, name, value, batch_no):
     """
@@ -58,7 +64,7 @@ def residual_block(x):
     strides = 1
     padding = "same"
     momentum = 0.8
-    activation = "relu"
+    activation = PReLU()
 
     res = Conv2D(filters=filters[0], kernel_size=kernel_size,
                  strides=strides, padding=padding)(x)
@@ -88,7 +94,7 @@ def build_generator():
 
     # Add the pre-residual block
     gen1 = Conv2D(filters=64, kernel_size=9, strides=1, padding='same',
-                  activation='relu')(input_layer)
+                  activation=PReLU())(input_layer)
 
     # Add 16 residual blocks
     res = residual_block(gen1)
@@ -105,14 +111,12 @@ def build_generator():
 
     # Add an upsampling block
     gen4 = UpSampling2D(size=2)(gen3)
-    gen4 = Conv2D(filters=256, kernel_size=3, strides=1, padding='same')(gen4)
-    gen4 = Activation('relu')(gen4)
+    gen4 = Conv2D(filters=256, kernel_size=3, strides=1, padding='same', activation=PReLU())(gen4)
 
     # Add another upsampling block
     gen5 = UpSampling2D(size=2)(gen4)
     gen5 = Conv2D(filters=256, kernel_size=3, strides=1,
-                  padding='same')(gen5)
-    gen5 = Activation('relu')(gen5)
+                  padding='same', activation=PReLU())(gen5)
 
     # Output convolution layer
     gen6 = Conv2D(filters=3, kernel_size=9, strides=1, padding='same')(gen5)
@@ -189,6 +193,7 @@ def build_discriminator():
 # Adversarial Network
 def build_adversarial_model(generator, discriminator, vgg):
     input_low_resolution = Input(shape=(64, 64, 3))
+    input_high_resolution = Input(shape=(256, 256, 3))
 
     fake_hr_images = generator(input_low_resolution)
     fake_features = vgg(fake_hr_images)
@@ -197,7 +202,7 @@ def build_adversarial_model(generator, discriminator, vgg):
 
     output = discriminator(fake_hr_images)
 
-    model = Model(inputs=[input_low_resolution],
+    model = Model(inputs=[input_low_resolution, input_high_resolution],
                   outputs=[output, fake_features])
 
     for layer in model.layers:
@@ -229,17 +234,24 @@ def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_sh
     return img1_high_resolution, img1_low_resolution
 
 
+def PSNR(true_image, predicted_image):
+    mse = numpy.mean((true_image - predicted_image) ** 2)
+    Pixel_max = 1.0
+    return 20 * math.log10(Pixel_max / math.sqrt(mse))
+
+
 # Define hyperparameters
-data_dir = glob('./DIV2K_train_HR/*')
-epochs = 10000
+data_dir = glob('./Training_data/*')
+epochs = 3
 batch_size = 1
+lr = 0.0002
 
 # Shape of low-resolution and high-resolution images
 low_resolution_shape = (64, 64, 3)
 high_resolution_shape = (256, 256, 3)
 
 # Common optimizer for all networks
-common_optimizer = Adam(0.0002, 0.5)
+common_optimizer = Adam(lr, 0.9)
 
 # Building and compiling the networks
 vgg = build_vgg()
@@ -257,85 +269,109 @@ generated_high_resolution_images = generator(input_low_resolution)
 features = vgg(generated_high_resolution_images)
 discriminator.trainable = False
 discriminator.compile(optimizer=common_optimizer, loss='mse', metrics=['accuracy'])
+print(discriminator.metrics_names)
 
 probs = discriminator(generated_high_resolution_images)
 
 adversarial_model = Model([input_low_resolution, input_high_resolution], [probs, features])
 adversarial_model.compile(optimizer=common_optimizer, loss=['binary_crossentropy', 'mse'], metrics=['accuracy'],
                           loss_weights=[1e-3, 1])
+print(adversarial_model.metrics_names)
+
 # Add Tensorboard
-tensorboard = TensorBoard(log_dir="logs/".format(time.time()))
+tensorboard = TensorBoard(log_dir="logs_celeba_test_2/".format(time.time()))
 tensorboard.set_model(generator)
 tensorboard.set_model(discriminator)
 
 # for epoch in range(epochs):
 # print("Epoch:{}".format(epoch))
-
+#
 # inpu = cv2.cvtColor(low_resolution_images, cv2.COLOR_BGR2RGB)
 # plt.imshow(inpu)
 # plt.show()
 # cv2.imshow('inpu', inpu)
 # cv2.waitKey(0)
-
-
+#
+#
 # print(len(low_resolution_images))
 
+# reduce_lr = keras.callbacks.ReduceLROnPlateau(monitor='lr', factor=0.001, patience=50, verbose=0, mode='auto',
+#                                               min_delta=0.0001,
+#                                               cooldown=50, min_lr=0.001)
+# reduce_lr.set_model(discriminator)
+
 # Training
-# for epoch in range(epochs):
-#     print("Epoch :{}".format(epoch))
-#     experiment.log_parameter('epoch', epoch)
-#
-#     # Training the discriminator network
-#
-#     high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
-#                                                                   low_resolution_shape=low_resolution_shape,
-#                                                                   high_resolution_shape=high_resolution_shape)
-#
-#     high_resolution_images = high_resolution_images / 127.5 - 1
-#     low_resolution_images = low_resolution_images / 127.5 - 1
-#
-#     low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
-#     high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
-#
-#     generated_high_resolution_images = generator.predict(low_resolution_images)
-#
-#     # Generating batch of real and fake labels
-#     real_labels = np.ones((batch_size, 16, 16, 1))
-#     fake_labels = np.zeros((batch_size, 16, 16, 1))
-#
-#     # d_loss_real = discriminator.train_on_batch(high_resolution_images, real_labels)
-#     # d_loss_fake = discriminator.train_on_batch(generated_high_resolution_images, fake_labels)
-#     #
-#     # # Calculating the discriminator loss
-#     # d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-#     # print("d_loss :", d_loss)
-#
-#     # Training the generator network
-#     high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
-#                                                                   low_resolution_shape=low_resolution_shape,
-#                                                                   high_resolution_shape=high_resolution_shape)
-#
-#     high_resolution_images = high_resolution_images / 127.5 - 1
-#     low_resolution_images = low_resolution_images / 127.5 - 1
-#
-#     low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
-#     high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
-#
-#     image_features = vgg.predict(high_resolution_images)
-#
-#     # g_loss = adversarial_model.train_on_batch([low_resolution_images, high_resolution_images],
-#     #                                           [real_labels, image_features])
-#     # print("g_loss :", g_loss)
-#     # # Write the losses to Tensorboard
-#     # write_log(tensorboard, 'g_loss', g_loss[0], epoch)
-#     # write_log(tensorboard, 'd_loss', d_loss[0], epoch)
-#     #
-#     # generator.save_weights("generator.h5")
-#     # discriminator.save_weights("discriminator.h5")
+for epoch in range(epochs):
+    print("Epoch :{}".format(epoch))
+    experiment.log_parameter('epoch', epoch)
 
+    # Training the discriminator network
 
-discriminator.load_weights("discriminator.h5")
-generator.load_weights("generator.h5")
+    high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
+                                                                  low_resolution_shape=low_resolution_shape,
+                                                                  high_resolution_shape=high_resolution_shape)
+
+    high_resolution_images = high_resolution_images / 127.5 - 1
+    low_resolution_images = low_resolution_images / 127.5 - 1
+
+    low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
+    high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+
+    generated_high_resolution_images = generator.predict(low_resolution_images)
+
+    # Generating batch of real and fake labels
+    real_labels = np.ones((batch_size, 16, 16, 1))
+    fake_labels = np.zeros((batch_size, 16, 16, 1))
+
+    d_loss_real = discriminator.train_on_batch(high_resolution_images, real_labels)
+    d_loss_fake = discriminator.train_on_batch(generated_high_resolution_images, fake_labels)
+    # reduce_lr.on_epoch_end(epoch)
+
+    # Calculating the discriminator loss
+    d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+    print("d_loss :", d_loss)
+    print(type(d_loss))
+
+    with open('d_loss', 'a', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        wr.writerow(d_loss)
+
+    # Training the generator network
+    high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
+                                                                  low_resolution_shape=low_resolution_shape,
+                                                                  high_resolution_shape=high_resolution_shape)
+
+    high_resolution_images = high_resolution_images / 127.5 - 1
+    low_resolution_images = low_resolution_images / 127.5 - 1
+
+    low_resolution_images = low_resolution_images.reshape(1, 64, 64, 3)
+    high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
+
+    image_features = vgg.predict(high_resolution_images)
+
+    g_loss = adversarial_model.train_on_batch([low_resolution_images, high_resolution_images],
+                                              [real_labels, image_features])
+    print("g_loss :", g_loss)
+    print(type(g_loss))
+    with open('g_loss', 'a', newline='') as myfileg:
+        wr = csv.writer(myfileg, quoting=csv.QUOTE_ALL)
+        wr.writerow(g_loss)
+
+    # Write the losses to Tensorboard
+    write_log(tensorboard, 'g_loss', g_loss[0], epoch)
+    write_log(tensorboard, 'discriminator_loss_g_loss', g_loss[1], epoch)
+    write_log(tensorboard, 'model_g_loss', g_loss[2], epoch)
+    write_log(tensorboard, 'discriminator_acc_g_loss', g_loss[3], epoch)
+    write_log(tensorboard, 'model_acc_g_loss', g_loss[4], epoch)
+
+    write_log(tensorboard, 'd_loss', d_loss[0], epoch)
+    write_log(tensorboard, 'd_acc', d_loss[1], epoch)
+
+generator.save_weights("generator_imagenet.h5")
+discriminator.save_weights("discriminator_imagenet.h5")
+
+# discriminator.load_weights("discriminator_celeb_a.h5")
+# generator.load_weights("generator_celeb_a.h5")
 
 high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
                                                               low_resolution_shape=low_resolution_shape,
@@ -349,10 +385,25 @@ high_resolution_images = high_resolution_images.reshape(1, 256, 256, 3)
 
 generated_images = generator.predict_on_batch(low_resolution_images)
 
-
 low_resolution_images = low_resolution_images.reshape(64, 64, 3)
 high_resolution_images = high_resolution_images.reshape(256, 256, 3)
 generated_images = generated_images.reshape(256, 256, 3)
+
+low_resolution_images = 0.5 * low_resolution_images + 0.5
+generated_images = 0.5 * generated_images + 0.5
+high_resolution_images = 0.5 * high_resolution_images + 0.5
+
+low_resolution_images = cv2.cvtColor(low_resolution_images, cv2.COLOR_BGR2RGB)
+high_resolution_images = cv2.cvtColor(high_resolution_images, cv2.COLOR_BGR2RGB)
+generated_images = cv2.cvtColor(generated_images, cv2.COLOR_BGR2RGB)
+
+psnr = PSNR(high_resolution_images, generated_images)
+psnr_test = compare_psnr(high_resolution_images, generated_images)
+print("PSNR: {}".format(psnr))
+print("PSNR_TEST: {}".format(psnr_test))
+
+(score, diff) = compare_ssim(high_resolution_images, generated_images, full=True, multichannel=True)
+print("SSIM: {}".format(score))
 
 fig = plt.figure()
 ax = fig.add_subplot(1, 3, 1)
@@ -371,17 +422,6 @@ ax.axis("off")
 ax.set_title("Generated")
 
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
 
 # generator.fit(low_resolution_images, high_resolution_images, batch_size=batch_size, epochs=epochs)
 
