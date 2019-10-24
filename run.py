@@ -1,6 +1,14 @@
+"""
+Filename: run.py
+Features: User developed SRGAN models
+Author: Mohamed Yasser Imran Zaheer
+Last Modified: 22/10/2019
+Dependencies: Keras, TensorFlow
+Github: https://github.com/yasseriz/SRGAN/tree/yasseriz-final
+"""
 from comet_ml import Experiment
 
-# experiment = Experiment("1Uf990Nvlki77d4AOubsK9lKX", project_name="SRGAN_Personal", log_env_gpu=True)
+experiment = Experiment("1Uf990Nvlki77d4AOubsK9lKX", project_name="SRGAN_Personal", log_env_gpu=True)
 
 import time
 import keras
@@ -49,7 +57,7 @@ def build_vgg():
     vgg = ResNet50(weights="imagenet")
     # Set the outputs to outputs of last conv. layer in block 3
     # See architecture at: https://github.com/keras-team/keras/blob/master/keras/applications/vgg19.py
-    vgg.outputs = [vgg.layers[2].output]
+    vgg.outputs = [vgg.layers[9].output]
 
     img = Input(shape=input_shape)
 
@@ -93,7 +101,6 @@ def build_generator():
     momentum = 0.8
     input_shape = (64, 64, 3)
     counter = 0
-    # path="Results_2/img_{}".format(epoch)
 
     # Input Layer of the generator network
     input_layer = Input(shape=input_shape)
@@ -115,12 +122,8 @@ def build_generator():
     gen3 = Add(name='trial')([gen2, gen1])
 
     # Add an upsampling block
-    # temp1 = np.array(gen3[:, :, 0])
-    # print(temp1.shape)
-    # custom_save(temp1, path=glob("Upsampling Analysis/before_{}".format(counter)), title="Before Upsampling")
     gen4 = UpSampling2D(size=2)(gen3)
     # gen4 = Conv2DTranspose(256, kernel_size=3, strides=2, padding='same')(gen3)
-    # custom_save(gen4[:, :, 0], path=glob("Upsampling Analysis/after_{}".format(counter)), title="After Upsampling")
     gen4 = Conv2D(filters=256, kernel_size=3, strides=1, padding='same')(gen4)
     gen4 = Activation(PReLU())(gen4)
 
@@ -136,7 +139,6 @@ def build_generator():
     # Keras model
     model = Model(inputs=[input_layer], outputs=[gen6],
                   name='generator')
-    # counter = counter + 1
 
     return model
 
@@ -223,9 +225,9 @@ def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_sh
         img1_low_resolution = imresize(img1, low_resolution_shape)
 
         # Do a random horizontal flip
-        # if np.random.random() < 0.5:
-        # img1_high_resolution = np.fliplr(img1_high_resolution)
-        # img1_low_resolution = np.fliplr(img1_low_resolution)
+        if np.random.random() < 0.5:
+          img1_high_resolution = np.fliplr(img1_high_resolution)
+          img1_low_resolution = np.fliplr(img1_low_resolution)
 
         high_resolution_images.append(img1_high_resolution)
         low_resolution_images.append(img1_low_resolution)
@@ -255,16 +257,6 @@ def save_images(low_resolution_images, high_resolution_images, generated_images,
     plt.clf()
 
 
-def custom_save(images, path, title):
-    plt.figure()
-    plt.imshow(images, cmap='viridis')
-    plt.axis("off")
-    plt.title(title)
-
-    plt.savefig(path)
-    plt.clf()
-
-
 def PSNR(true_image, predicted_image):
     mse = numpy.mean((true_image - predicted_image) ** 2)
     Pixel_max = 1.0
@@ -285,6 +277,7 @@ if __name__ == '__main__':
     # Common optimizer for all networks
     common_optimizer = Adam(lr, 0.9)
 
+    # Training the model
     if mode == 'train':
 
         # Building and compiling the networks
@@ -362,6 +355,7 @@ if __name__ == '__main__':
             write_log(tensorboard, 'd_loss_fake', d_loss_fake[0], epoch)
             write_log(tensorboard, 'd_loss_fake_acc', d_loss_fake[1], epoch)
 
+            # Data logging to csv
             # with open('d_loss_real', 'a', newline='') as myfile:
             #     fileEmpty = os.stat('d_loss_real').st_size == 0
             #
@@ -391,6 +385,7 @@ if __name__ == '__main__':
             print("d_loss :", d_loss)
             # print(type(d_loss))
 
+            # Data logging to csv
             # with open('d_loss', 'a', newline='') as myfile:
             #     fileEmpty = os.stat('d_loss').st_size == 0
             #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
@@ -418,6 +413,7 @@ if __name__ == '__main__':
             print("g_loss :", g_loss)
             # print(type(g_loss))
 
+            # Data logging to csv
             # with open('g_loss', 'a', newline='') as myfile:
             #     fileEmpty = os.stat('g_loss').st_size == 0
             #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
@@ -436,6 +432,7 @@ if __name__ == '__main__':
             write_log(tensorboard, 'd_loss', d_loss[0], epoch)
             write_log(tensorboard, 'd_acc', d_loss[1], epoch)
 
+            # Saving images
             if epoch % 100 == 0:
                 high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
                                                                               high_resolution_shape=high_resolution_shape,
@@ -454,6 +451,7 @@ if __name__ == '__main__':
                     save_images(low_resolution_images, high_resolution_images, generated_images,
                                 path="Results_2/img_{}".format(epoch))
 
+                # Calculating PSNR and SSIM metrics
                 psnr = PSNR(high_resolution_images[0], generated_images[0])
                 print("PSNR: {}".format(psnr))
                 psnr = [float(psnr)]
@@ -472,18 +470,22 @@ if __name__ == '__main__':
         generator.save_weights("generator_imagenet_res.h5")
         discriminator.save_weights("discriminator_imagenet_res.h5")
 
+        # Predict Results
     if mode == 'Predict':
+        # Build discriminator and generator
         discriminator = build_discriminator()
         generator = build_generator()
 
+        # Load weights from training
         discriminator.load_weights("discriminator_imagenet_res.h5")
         generator.load_weights("generator_imagenet_res.h5")
 
+        # Load test images
         data_dir = glob('./Predict/*')
         high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=2,
                                                                       high_resolution_shape=high_resolution_shape,
                                                                       low_resolution_shape=low_resolution_shape)
-
+        # Normalizing the image
         high_resolution_images = high_resolution_images / 127.5 - 1
         low_resolution_images = low_resolution_images / 127.5 - 1
 
@@ -493,6 +495,7 @@ if __name__ == '__main__':
         generated_images = 0.5 * generated_images + 0.5
         high_resolution_images = 0.5 * high_resolution_images + 0.5
 
+        # Calculating PSNR and SSIM of images
         psnr1 = PSNR(high_resolution_images[0], generated_images[0])
         (score1, diff1) = compare_ssim(high_resolution_images[0], generated_images[0], full=True, multichannel=True)
         print("PSNR_first_image: {}".format(psnr1))
@@ -503,8 +506,9 @@ if __name__ == '__main__':
         print("PSNR_second_image: {}".format(psnr2))
         print("SSIM_second_image: {}".format(score2))
 
+        # Saving images
         for index, img in enumerate(generated_images):
             save_images(low_resolution_images, high_resolution_images, generated_images,
                         path="results/gen_{}".format(index))
 
-# experiment.end()
+experiment.end()
