@@ -1,6 +1,6 @@
 from comet_ml import Experiment
 
-experiment = Experiment("1Uf990Nvlki77d4AOubsK9lKX", project_name="Modfified SRGAN", log_env_gpu=True)
+experiment = Experiment("1Uf990Nvlki77d4AOubsK9lKX", project_name="SRGAN_Personal", log_env_gpu=True)
 
 import time
 import keras
@@ -93,7 +93,6 @@ def build_generator():
     momentum = 0.8
     input_shape = (64, 64, 3)
     counter = 0
-    # path="Results_2/img_{}".format(epoch)
 
     # Input Layer of the generator network
     input_layer = Input(shape=input_shape)
@@ -115,12 +114,8 @@ def build_generator():
     gen3 = Add(name='trial')([gen2, gen1])
 
     # Add an upsampling block
-    # temp1 = np.array(gen3[:, :, 0])
-    # print(temp1.shape)
-    # custom_save(temp1, path=glob("Upsampling Analysis/before_{}".format(counter)), title="Before Upsampling")
     gen4 = UpSampling2D(size=2)(gen3)
     # gen4 = Conv2DTranspose(256, kernel_size=3, strides=2, padding='same')(gen3)
-    # custom_save(gen4[:, :, 0], path=glob("Upsampling Analysis/after_{}".format(counter)), title="After Upsampling")
     gen4 = Conv2D(filters=256, kernel_size=3, strides=1, padding='same')(gen4)
     gen4 = Activation(PReLU())(gen4)
 
@@ -137,8 +132,20 @@ def build_generator():
     # model = Model(inputs=[input_layer], outputs=[gen6],
     #               name='generator')
     # counter = counter + 1
+
+    # Keras model
+    model = Model(inputs=[input_layer], outputs=[gen6],
+                  name='generator')
+
+    return model
+
+
+def build_autoencoder():
+
+    input_shape = (256, 256, 3)
+    input_layer = Input(shape=input_shape)
     # Auto-Encoder
-    x = Conv2D(512, (3, 3), activation='relu', strides=1, padding='same')(gen6)
+    x = Conv2D(512, (3, 3), activation='relu', strides=1, padding='same')(input_layer)
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(256, (3, 3), activation='relu', strides=1, padding='same')(x)
     encoded = MaxPooling2D((2, 2), padding='same')(x)
@@ -150,11 +157,15 @@ def build_generator():
     x = Conv2D(512, (3, 3), activation='relu', strides=1, padding='same')(x)
     x = UpSampling2D((2, 2))(x)
     decoded = Conv2D(3, (3, 3), activation='tanh', strides=1, padding='same')(x)
+
+
+
+
     # Keras model
     model = Model(inputs=[input_layer], outputs=[decoded],
-                  name='generator')
-    return model
+                  name='autoencoder')
 
+    return model
 
 # Discriminator Network
 def build_discriminator():
@@ -238,9 +249,9 @@ def sample_images(data_dir, batch_size, high_resolution_shape, low_resolution_sh
         img1_low_resolution = imresize(img1, low_resolution_shape)
 
         # Do a random horizontal flip
-        # if np.random.random() < 0.5:
-        # img1_high_resolution = np.fliplr(img1_high_resolution)
-        # img1_low_resolution = np.fliplr(img1_low_resolution)
+        if np.random.random() < 0.5:
+          img1_high_resolution = np.fliplr(img1_high_resolution)
+          img1_low_resolution = np.fliplr(img1_low_resolution)
 
         high_resolution_images.append(img1_high_resolution)
         low_resolution_images.append(img1_low_resolution)
@@ -266,20 +277,38 @@ def save_images(low_resolution_images, high_resolution_images, generated_images,
     ax.axis("off")
     ax.set_title("Generated")
 
-    plt.savefig(path)
-    plt.clf()
-
-
-def custom_save(images, path, title):
-    plt.figure()
-    plt.imshow(images, cmap='viridis')
-    plt.axis("off")
-    plt.title(title)
+    # ax = fig.add_subplot(1, 4, 4)
+    # ax.imshow(autoencoder_images[0])
+    # ax.axis("off")
+    # ax.set_title("Output")
 
     plt.savefig(path)
     plt.clf()
 
+def save_images_predict(low_resolution_images, high_resolution_images, generated_images, autoencoder_images, path):
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 4, 1)
+    ax.imshow(low_resolution_images[0])
+    ax.axis("off")
+    ax.set_title("Low-resolution")
 
+    ax = fig.add_subplot(1, 4, 2)
+    ax.imshow(high_resolution_images[0])
+    ax.axis("off")
+    ax.set_title("Original")
+
+    ax = fig.add_subplot(1, 4, 3)
+    ax.imshow(generated_images[0])
+    ax.axis("off")
+    ax.set_title("Generated")
+
+    ax = fig.add_subplot(1, 4, 4)
+    ax.imshow(autoencoder_images[0])
+    ax.axis("off")
+    ax.set_title("Output")
+
+    plt.savefig(path)
+    plt.clf()
 def PSNR(true_image, predicted_image):
     mse = numpy.mean((true_image - predicted_image) ** 2)
     Pixel_max = 1.0
@@ -288,9 +317,9 @@ def PSNR(true_image, predicted_image):
 
 if __name__ == '__main__':
     # Define hyperparameters
-    data_dir = glob('./DIV2K_train_HR/*')
-    epochs = 30001
-    batch_size = 2
+    data_dir = glob('./Training_data/*')
+    epochs = 60001
+    batch_size = 4
     lr = 0.0002
     mode = 'Predict'
     # Shape of low-resolution and high-resolution images
@@ -300,6 +329,7 @@ if __name__ == '__main__':
     # Common optimizer for all networks
     common_optimizer = Adam(lr, 0.9)
 
+    # Training the model
     if mode == 'train':
 
         # Building and compiling the networks
@@ -318,6 +348,11 @@ if __name__ == '__main__':
         generator = build_generator()
         print("generator")
         print(generator.summary())
+
+        autoencoder = build_autoencoder()
+        autoencoder.compile(optimizer='adadelta', loss='mse')
+        print(autoencoder.summary())
+
 
         # Building and compiling the adversarial network
         # High and Low resolution inputs to the network
@@ -346,9 +381,10 @@ if __name__ == '__main__':
         # print(adversarial_model.metrics_names)
 
         # Add Tensorboard
-        tensorboard = TensorBoard(log_dir="logs_imagenet_new4/".format(time.time()))
+        tensorboard = TensorBoard(log_dir="logs_imagenet_NEWARCHITECTURE1/".format(time.time()))
         tensorboard.set_model(generator)
         tensorboard.set_model(discriminator)
+        tensorboard.set_model(autoencoder)
 
         # Training
         for epoch in range(epochs):
@@ -365,6 +401,10 @@ if __name__ == '__main__':
 
             generated_high_resolution_images = generator.predict(low_resolution_images)
 
+            a = autoencoder.train_on_batch(generated_high_resolution_images, high_resolution_images)
+            write_log(tensorboard,'autoencoder', a, epoch)
+            # cleaned_high_resolution_images = autoencoder.predict(generated_high_resolution_images)
+
             # Generating batch of real and fake labels
             real_labels = np.ones((batch_size, 16, 16, 1))
             fake_labels = np.zeros((batch_size, 16, 16, 1))
@@ -377,44 +417,46 @@ if __name__ == '__main__':
             write_log(tensorboard, 'd_loss_fake', d_loss_fake[0], epoch)
             write_log(tensorboard, 'd_loss_fake_acc', d_loss_fake[1], epoch)
 
-            with open('d_loss_real.csv', 'a', newline='') as myfile:
-                fileEmpty = os.stat('d_loss_real.csv').st_size == 0
-
-                wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-                headers = ['Loss', 'Acc']
-                writer = csv.DictWriter(myfile, fieldnames=headers)
-
-                if fileEmpty:
-                    writer.writeheader()
-
-                wr.writerow(d_loss_real)
-
-            with open('d_loss_fake.csv', 'a', newline='') as myfile:
-                fileEmpty = os.stat('d_loss_fake.csv').st_size == 0
-
-                wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-                headers = ['Loss', 'Acc']
-                writer = csv.DictWriter(myfile, fieldnames=headers)
-
-                if fileEmpty:
-                    writer.writeheader()
-
-                wr.writerow(d_loss_fake)
+            # Data logging to csv
+            # with open('d_loss_real', 'a', newline='') as myfile:
+            #     fileEmpty = os.stat('d_loss_real').st_size == 0
+            #
+            #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+            #     headers = ['Loss', 'Acc']
+            #     writer = csv.DictWriter(myfile, fieldnames=headers)
+            #
+            #     if fileEmpty:
+            #         writer.writeheader()
+            #
+            #     wr.writerow(d_loss_real)
+            #
+            # with open('d_loss_fake', 'a', newline='') as myfile:
+            #     fileEmpty = os.stat('d_loss_fake').st_size == 0
+            #
+            #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+            #     headers = ['Loss', 'Acc']
+            #     writer = csv.DictWriter(myfile, fieldnames=headers)
+            #
+            #     if fileEmpty:
+            #         writer.writeheader()
+            #
+            #     wr.writerow(d_loss_fake)
 
             # Calculating the discriminator loss
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
             print("d_loss :", d_loss)
             # print(type(d_loss))
 
-            with open('d_loss.csv', 'a', newline='') as myfile:
-                fileEmpty = os.stat('d_loss.csv').st_size == 0
-                wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-                headers = ['Loss', 'Acc']
-                writer = csv.DictWriter(myfile, fieldnames=headers)
-
-                if fileEmpty:
-                    writer.writeheader()
-                wr.writerow(d_loss)
+            # Data logging to csv
+            # with open('d_loss', 'a', newline='') as myfile:
+            #     fileEmpty = os.stat('d_loss').st_size == 0
+            #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+            #     headers = ['Loss', 'Acc']
+            #     writer = csv.DictWriter(myfile, fieldnames=headers)
+            #
+            #     if fileEmpty:
+            #         writer.writeheader()
+            #     wr.writerow(d_loss)
 
             # Training the generator network
             high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
@@ -433,24 +475,26 @@ if __name__ == '__main__':
             print("g_loss :", g_loss)
             # print(type(g_loss))
 
-            with open('g_loss.csv', 'a', newline='') as myfile:
-                fileEmpty = os.stat('g_loss.csv').st_size == 0
-                wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-                headers = ['Loss', 'Discriminator_loss', 'vgg_loss']
-                writer = csv.DictWriter(myfile, fieldnames=headers)
-
-                if fileEmpty:
-                    writer.writeheader()
-                wr.writerow(g_loss)
+            # Data logging to csv
+            # with open('g_loss', 'a', newline='') as myfile:
+            #     fileEmpty = os.stat('g_loss').st_size == 0
+            #     wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+            #     headers = ['Loss', 'Discriminator_loss', 'vgg_loss']
+            #     writer = csv.DictWriter(myfile, fieldnames=headers)
+            #
+            #     if fileEmpty:
+            #         writer.writeheader()
+            #     wr.writerow(g_loss)
 
             # Write the losses to Tensorboard
             write_log(tensorboard, 'g_loss', g_loss[0], epoch)
             write_log(tensorboard, 'discriminator_loss', g_loss[1], epoch)
-            write_log(tensorboard, 'ResNet_loss', g_loss[2], epoch)
+            write_log(tensorboard, 'VGG_Loss', g_loss[2], epoch)
 
             write_log(tensorboard, 'd_loss', d_loss[0], epoch)
             write_log(tensorboard, 'd_acc', d_loss[1], epoch)
 
+            # Saving images
             if epoch % 100 == 0:
                 high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=batch_size,
                                                                               high_resolution_shape=high_resolution_shape,
@@ -460,15 +504,16 @@ if __name__ == '__main__':
                 low_resolution_images = low_resolution_images / 255.0
 
                 generated_images = generator.predict_on_batch(low_resolution_images)
-
+                autoencoder_images = autoencoder.predict_on_batch(generated_images)
                 # low_resolution_images = 0.5 * low_resolution_images + 0.5
                 # generated_images = 0.5 * generated_images + 0.5
                 # high_resolution_images = 0.5 * high_resolution_images + 0.5
 
                 for index, img in enumerate(generated_images):
-                    save_images(low_resolution_images, high_resolution_images, generated_images,
-                                path="RESULTS_NEW4/img_{}".format(epoch))
+                    save_images(low_resolution_images, high_resolution_images, generated_images, autoencoder_images,
+                                path="RESULTS_NEW5/img_{}".format(epoch))
 
+                # Calculating PSNR and SSIM metrics
                 psnr = PSNR(high_resolution_images[0], generated_images[0])
                 print("PSNR: {}".format(psnr))
                 psnr = [float(psnr)]
@@ -484,39 +529,56 @@ if __name__ == '__main__':
                 #     wr = csv.writer(myfileg, quoting=csv.QUOTE_ALL)
                 #     wr.writerow(score)
 
-        generator.save_weights("generator_imagenet_NEW4.h5")
-        discriminator.save_weights("discriminator_imagenet_NEW4.h5")
+        generator.save_weights("generator_imagenet_BRANDNEW1.h5")
+        discriminator.save_weights("discriminator_imagenet_BRANDNEW1.h5")
+        autoencoder.save_weights("autoencoder_BRANDNEW1.h5")
 
+        # Predict Results
     if mode == 'Predict':
+        # Build discriminator and generator
         discriminator = build_discriminator()
         generator = build_generator()
+        autoencoder = build_autoencoder()
+        # Load weights from training
+        discriminator.load_weights("discriminator_imagenet_BRANDNEW1.h5")
+        generator.load_weights("generator_imagenet_BRANDNEW1.h5")
+        autoencoder.load_weights("autoencoder_BRANDNEW1.h5")
 
-        discriminator.load_weights("discriminator_imagenet_NEW4.h5")
-        generator.load_weights("generator_imagenet_NEW4.h5")
-
+        # Load test images
         data_dir = glob('./Predict/*')
         high_resolution_images, low_resolution_images = sample_images(data_dir=data_dir, batch_size=2,
                                                                       high_resolution_shape=high_resolution_shape,
                                                                       low_resolution_shape=low_resolution_shape)
-
+        # Normalizing the image
         high_resolution_images = high_resolution_images / 255.0
         low_resolution_images = low_resolution_images / 255.0
 
         generated_images = generator.predict_on_batch(low_resolution_images)
+        cleaned_generated_images = autoencoder.predict_on_batch(generated_images)
+        # low_resolution_images = 0.5 * low_resolution_images + 0.5
+        # generated_images = 0.5 * generated_images + 0.5
+        # high_resolution_images = 0.5 * high_resolution_images + 0.5
 
-
+        # Calculating PSNR and SSIM of images
         psnr1 = PSNR(high_resolution_images[0], generated_images[0])
+        psnr1_auto = PSNR(high_resolution_images[0], cleaned_generated_images[0])
         (score1, diff1) = compare_ssim(high_resolution_images[0], generated_images[0], full=True, multichannel=True)
+        (score1_auto, diff1_autttttto) = compare_ssim(high_resolution_images[0], cleaned_generated_images[0], full=True, multichannel=True)
         print("PSNR_first_image: {}".format(psnr1))
+        print("PSNR_first_image AUTOENCODER: {}".format(psnr1_auto))
         print("SSIM_first_image: {}".format(score1))
+        print("SSIM_first_image AUTOENCODER: {}".format(score1_auto))
 
         psnr2 = PSNR(high_resolution_images[1], generated_images[1])
         (score2, diff2) = compare_ssim(high_resolution_images[1], generated_images[1], full=True, multichannel=True)
         print("PSNR_second_image: {}".format(psnr2))
         print("SSIM_second_image: {}".format(score2))
 
+        # Saving images
         for index, img in enumerate(generated_images):
-            save_images(low_resolution_images, high_resolution_images, generated_images,
+            save_images_predict(low_resolution_images, high_resolution_images, generated_images, cleaned_generated_images,
+                        path="results/gen4_{}".format(index))
+            save_images(low_resolution_images, high_resolution_images, cleaned_generated_images,
                         path="results/gen_{}".format(index))
 
 experiment.end()
